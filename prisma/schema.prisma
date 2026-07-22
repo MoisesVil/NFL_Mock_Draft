@@ -1,0 +1,104 @@
+// Prisma schema for the NFL Mock Draft Simulator.
+// See CLAUDE.md for the full data-model rationale.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled (Supavisor) — used by the app
+  directUrl = env("DIRECT_URL") // direct — used only for migrations
+}
+
+// ---------- Reference data (seeded once, never mutated) ----------
+
+model Team {
+  id           String  @id @default(cuid())
+  name         String
+  abbreviation String  @unique
+  conference   String
+  division     String
+  logoUrl      String?
+  primaryColor String?
+
+  needs            TeamNeed[]
+  originalPicks    DraftPick[]
+  prospectsDrafted Prospect[]
+}
+
+model Prospect {
+  id            String  @id @default(cuid())
+  name          String
+  position      String
+  school        String
+  heightInches  Int?
+  weightLbs     Int?
+  consensusRank Int // drives CPU "best available"
+  grade         Float?
+  headshotUrl   String?
+
+  // real 2026 outcome, for scoring a mock against reality
+  actualOverallPick Int?
+  actualTeamId      String?
+  actualTeam        Team?   @relation(fields: [actualTeamId], references: [id])
+
+  @@index([consensusRank])
+  @@index([position])
+}
+
+model TeamNeed {
+  id       String @id @default(cuid())
+  teamId   String
+  team     Team   @relation(fields: [teamId], references: [id])
+  position String
+  weight   Int // 1 = mild ... 3 = critical
+
+  @@unique([teamId, position])
+}
+
+model DraftPick {
+  id             String @id @default(cuid())
+  year           Int // 2026
+  round          Int
+  overall        Int    @unique // 1..257
+  originalTeamId String
+  originalTeam   Team   @relation(fields: [originalTeamId], references: [id])
+}
+
+// ---------- Session data (written only when a user SAVES a mock) ----------
+
+model MockDraft {
+  id         String   @id @default(cuid())
+  shareId    String   @unique @default(cuid())
+  userId     String? // null until auth is added
+  userTeamId String
+  status     String   @default("complete") // in_progress | complete
+  createdAt  DateTime @default(now())
+
+  picks  MockPick[]
+  trades Trade[]
+}
+
+model MockPick {
+  id            String    @id @default(cuid())
+  mockDraftId   String
+  mockDraft     MockDraft @relation(fields: [mockDraftId], references: [id], onDelete: Cascade)
+  round         Int
+  overall       Int
+  currentTeamId String // owner after trades in this sim
+  prospectId    String?
+  pickedByCpu   Boolean   @default(true)
+
+  @@unique([mockDraftId, overall])
+}
+
+model Trade {
+  id          String    @id @default(cuid())
+  mockDraftId String
+  mockDraft   MockDraft @relation(fields: [mockDraftId], references: [id], onDelete: Cascade)
+  atOverall   Int
+  fromTeamId  String
+  toTeamId    String
+  assets      Json // { fromTeam: [overall...], toTeam: [overall...] }
+}
